@@ -425,6 +425,11 @@ input QueryChannelInput {
   Filtering options for Channels returned from the connection.
   """
   hasTag: String
+
+  """
+  Filter channels that support the specified model.
+  """
+  model: String
 }
 
 input CountChannelsByTypeInput {

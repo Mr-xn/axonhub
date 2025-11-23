@@ -436,16 +436,13 @@ func (r *queryResolver) CountChannelsByType(ctx context.Context, input CountChan
 }
 
 // QueryChannels is the resolver for the queryChannels field.
-func (r *queryResolver) QueryChannels(ctx context.Context, input QueryChannelInput) (*ent.ChannelConnection, error) {
+func (r *queryResolver) QueryChannels(ctx context.Context, input biz.QueryChannelsInput) (*ent.ChannelConnection, error) {
 	if err := validatePaginationArgs(input.First, input.Last); err != nil {
 		return nil, err
 	}
 
-	return r.client.Channel.Query().Paginate(ctx, input.After, input.First, input.Before, input.Last,
-		ent.WithChannelOrder(input.OrderBy),
-		ent.WithChannelFilter(input.Where.Filter),
-		ent.WithChannelTagFilter(input.HasTag),
-	)
+	// Call the biz layer method directly
+	return r.channelService.QueryChannels(ctx, input)
 }
 
 // ID is the resolver for the id field.

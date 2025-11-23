@@ -400,7 +400,7 @@ type ComplexityRoot struct {
 		Node                  func(childComplexity int, id objects.GUID) int
 		Nodes                 func(childComplexity int, ids []*objects.GUID) int
 		Projects              func(childComplexity int, after *entgql.Cursor[int], first *int, before *entgql.Cursor[int], last *int, orderBy *ent.ProjectOrder, where *ent.ProjectWhereInput) int
-		QueryChannels         func(childComplexity int, input QueryChannelInput) int
+		QueryChannels         func(childComplexity int, input biz.QueryChannelsInput) int
 		RequestStats          func(childComplexity int) int
 		RequestStatsByChannel func(childComplexity int) int
 		RequestStatsByModel   func(childComplexity int) int
@@ -930,7 +930,7 @@ type QueryResolver interface {
 	Models(ctx context.Context, status *channel.Status) ([]*Model, error)
 	AllChannelTags(ctx context.Context) ([]string, error)
 	CountChannelsByType(ctx context.Context, input CountChannelsByTypeInput) ([]*ChannelTypeCount, error)
-	QueryChannels(ctx context.Context, input QueryChannelInput) (*ent.ChannelConnection, error)
+	QueryChannels(ctx context.Context, input biz.QueryChannelsInput) (*ent.ChannelConnection, error)
 	DashboardOverview(ctx context.Context) (*DashboardOverview, error)
 	RequestStats(ctx context.Context) (*RequestStats, error)
 	RequestStatsByChannel(ctx context.Context) ([]*RequestStatsByChannel, error)
@@ -2859,7 +2859,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.QueryChannels(childComplexity, args["input"].(QueryChannelInput)), true
+		return e.complexity.Query.QueryChannels(childComplexity, args["input"].(biz.QueryChannelsInput)), true
 
 	case "Query.requestStats":
 		if e.complexity.Query.RequestStats == nil {
@@ -6339,7 +6339,7 @@ func (ec *executionContext) field_Query_projects_args(ctx context.Context, rawAr
 func (ec *executionContext) field_Query_queryChannels_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNQueryChannelInput2githubᚗcomᚋloopljᚋaxonhubᚋinternalᚋserverᚋgqlᚐQueryChannelInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNQueryChannelInput2githubᚗcomᚋloopljᚋaxonhubᚋinternalᚋserverᚋbizᚐQueryChannelsInput)
 	if err != nil {
 		return nil, err
 	}
@@ -18345,7 +18345,7 @@ func (ec *executionContext) _Query_queryChannels(ctx context.Context, field grap
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().QueryChannels(rctx, fc.Args["input"].(QueryChannelInput))
+		return ec.resolvers.Query().QueryChannels(rctx, fc.Args["input"].(biz.QueryChannelsInput))
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -39727,14 +39727,14 @@ func (ec *executionContext) unmarshalInputProxyConfigInput(ctx context.Context, 
 	return it, nil
 }
 
-func (ec *executionContext) unmarshalInputQueryChannelInput(ctx context.Context, obj any) (QueryChannelInput, error) {
-	var it QueryChannelInput
+func (ec *executionContext) unmarshalInputQueryChannelInput(ctx context.Context, obj any) (biz.QueryChannelsInput, error) {
+	var it biz.QueryChannelsInput
 	asMap := map[string]any{}
 	for k, v := range obj.(map[string]any) {
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"after", "first", "before", "last", "orderBy", "where", "hasTag"}
+	fieldsInOrder := [...]string{"after", "first", "before", "last", "orderBy", "where", "hasTag", "model"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -39790,6 +39790,13 @@ func (ec *executionContext) unmarshalInputQueryChannelInput(ctx context.Context,
 				return it, err
 			}
 			it.HasTag = data
+		case "model":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("model"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Model = data
 		}
 	}
 
@@ -58392,7 +58399,7 @@ func (ec *executionContext) marshalNProxyType2githubᚗcomᚋloopljᚋaxonhubᚋ
 	return res
 }
 
-func (ec *executionContext) unmarshalNQueryChannelInput2githubᚗcomᚋloopljᚋaxonhubᚋinternalᚋserverᚋgqlᚐQueryChannelInput(ctx context.Context, v any) (QueryChannelInput, error) {
+func (ec *executionContext) unmarshalNQueryChannelInput2githubᚗcomᚋloopljᚋaxonhubᚋinternalᚋserverᚋbizᚐQueryChannelsInput(ctx context.Context, v any) (biz.QueryChannelsInput, error) {
 	res, err := ec.unmarshalInputQueryChannelInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }

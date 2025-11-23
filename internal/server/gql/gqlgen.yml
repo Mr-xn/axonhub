@@ -95,6 +95,9 @@ models:
   BulkCreateChannelsInput:
     model:
       - github.com/looplj/axonhub/internal/server/biz.BulkCreateChannelsInput
+  QueryChannelInput:
+    model:
+      - github.com/looplj/axonhub/internal/server/biz.QueryChannelsInput
   StoragePolicy:
     model:
       - github.com/looplj/axonhub/internal/server/biz.StoragePolicy
