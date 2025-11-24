@@ -2,12 +2,12 @@ package biz
 
 import (
 	"context"
-	"sort"
+
+	"github.com/looplj/axonhub/internal/ent"
 
 	"entgo.io/contrib/entgql"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqljson"
-	"github.com/looplj/axonhub/internal/ent"
 	"github.com/samber/lo"
 )
 
@@ -52,182 +52,158 @@ func (svc *ChannelService) QueryChannels(ctx context.Context, input QueryChannel
 		)
 	}
 
-	var connections ent.ChannelConnection
+	// When model filtering is required, we need to do in-memory pagination
+	return svc.queryChannelsWithModelFilter(ctx, query, input)
+}
 
-	var channels []*ent.Channel
-	hasNextPage := true
-	hasPreviousPage := true
+// queryChannelsWithModelFilter performs model filtering with paginated fetching.
+// It fetches channels in batches until we have enough matching results.
+func (svc *ChannelService) queryChannelsWithModelFilter(
+	ctx context.Context,
+	query *ent.ChannelQuery,
+	input QueryChannelsInput,
+) (*ent.ChannelConnection, error) {
+	// Get the order to use
+	order := input.OrderBy
+	if order == nil {
+		order = ent.DefaultChannelOrder
+	}
 
-	for i := 0; i < 10; i++ {
-		page, err := query.Paginate(ctx, input.After, input.First, input.Before, input.Last,
-			ent.WithChannelOrder(input.OrderBy),
+	// Determine how many results we need
+	var needed int
+	if input.First != nil {
+		needed = *input.First + 1 // +1 to check hasNextPage
+	} else if input.Last != nil {
+		needed = *input.Last + 1 // +1 to check hasPreviousPage
+	} else {
+		needed = 100 // Default limit when no pagination specified
+	}
+
+	// Collect filtered channels by fetching in batches
+	var filteredChannels []*ent.Channel
+	var currentAfter *ent.Cursor = input.After
+	var lastPageInfo *ent.PageInfo
+	const batchSize = 50     // Fetch 50 at a time
+	const maxIterations = 20 // Safety limit to prevent infinite loops
+
+	for range maxIterations {
+		// Fetch a batch of channels
+		page, err := query.Paginate(ctx, currentAfter, lo.ToPtr(batchSize), input.Before, nil,
+			ent.WithChannelOrder(order),
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		enough := false
+		lastPageInfo = &page.PageInfo
 
-		for _, ch := range page.Edges {
-			channelObj := Channel{Channel: ch.Node}
+		// Filter this batch by model support
+		for _, edge := range page.Edges {
+			channelObj := Channel{Channel: edge.Node}
 			if channelObj.IsModelSupported(*input.Model) {
-				channels = append(channels, ch.Node)
-			}
-			if input.First != nil && len(channels) >= *input.First {
-				enough = true
-				break
-			}
-			if input.Last != nil && len(channels) >= *input.Last {
-				enough = true
-				break
+				filteredChannels = append(filteredChannels, edge.Node)
+
+				// Check if we have enough results
+				if len(filteredChannels) >= needed {
+					break
+				}
 			}
 		}
 
-		if enough {
+		// Stop if we have enough or no more pages
+		if len(filteredChannels) >= needed || !page.PageInfo.HasNextPage {
 			break
 		}
 
-		if input.Last != nil && !page.PageInfo.HasNextPage {
-			hasNextPage = false
-			break
-		}
-
-		if input.First != nil && !page.PageInfo.HasPreviousPage {
-			hasPreviousPage = false
-			break
-		}
-	}
-
-	// Build page info
-	pageInfo := ent.PageInfo{
-		HasNextPage:     hasNextPage,
-		HasPreviousPage: hasPreviousPage,
-		StartCursor:     startCursor,
-		EndCursor:       endCursor,
-	}
-
-	// Return connection
-	return &ent.ChannelConnection{
-		Edges:      edges,
-		PageInfo:   pageInfo,
-		TotalCount: totalCount,
-	}, nil
-}
-
-func (svc *ChannelService) filteredChannelsByModel(ctx context.Context, connection *ent.ChannelConnection, model string) ([]*ent.Channel, error) {
-	var channels []*ent.Channel
-	for _, ch := range connection.Edges {
-		channel := Channel{Channel: ch.Node}
-		if channel.IsModelSupported(model) {
-			channels = append(channels, ch.Node)
-		}
-	}
-	return channels, nil
-}
-
-// sortChannels sorts channels based on the specified order.
-func (svc *ChannelService) sortChannels(channels []*ent.Channel, orderBy *ent.ChannelOrder) []*ent.Channel {
-	if orderBy == nil || orderBy.Field == nil {
-		return channels
-	}
-
-	fieldName := orderBy.Field.String()
-	direction := orderBy.Direction.String()
-
-	sortedChannels := lo.Slice(channels, 0, len(channels))
-
-	sort.Slice(sortedChannels, func(i, j int) bool {
-		a := sortedChannels[i]
-		b := sortedChannels[j]
-
-		switch fieldName {
-		case "CREATED_AT":
-			if direction == "ASC" {
-				return a.CreatedAt.Before(b.CreatedAt)
-			}
-			return a.CreatedAt.After(b.CreatedAt)
-		case "UPDATED_AT":
-			if direction == "ASC" {
-				return a.UpdatedAt.Before(b.UpdatedAt)
-			}
-			return a.UpdatedAt.After(b.UpdatedAt)
-		case "ORDERING_WEIGHT":
-			if direction == "ASC" {
-				return a.OrderingWeight < b.OrderingWeight
-			}
-			return a.OrderingWeight > b.OrderingWeight
-		default:
-			// Default to ID sorting if field is not recognized
-			if direction == "ASC" {
-				return a.ID < b.ID
-			}
-			return a.ID > b.ID
-		}
-	})
-
-	return sortedChannels
-}
-
-// calculatePagination calculates the start and end indices for pagination.
-func (svc *ChannelService) calculatePagination(
-	channels []*ent.Channel,
-	totalCount int,
-	after *entgql.Cursor[int],
-	first *int,
-	before *entgql.Cursor[int],
-	last *int,
-) (int, int) {
-	if totalCount == 0 {
-		return 0, 0
-	}
-
-	startIndex := 0
-	endIndex := totalCount
-
-	// Handle after cursor
-	if after != nil {
-		for i, ch := range channels {
-			if ch.ID == after.Value {
-				startIndex = i + 1
-				break
-			}
-		}
-	}
-
-	// Handle before cursor
-	if before != nil {
-		for i, ch := range channels {
-			if ch.ID == before.Value {
-				endIndex = i
-				break
-			}
-		}
-	}
-
-	// Handle first limit
-	if first != nil {
-		limitEnd := startIndex + *first
-		if limitEnd < endIndex {
-			endIndex = limitEnd
-		}
-	}
-
-	// Handle last limit
-	if last != nil {
-		if first == nil {
-			// If only last is specified, take the last N items
-			startIndex = endIndex - *last
-			if startIndex < 0 {
-				startIndex = 0
-			}
+		// Move to next page
+		if len(page.Edges) > 0 {
+			currentAfter = &page.Edges[len(page.Edges)-1].Cursor
 		} else {
-			// If both first and last are specified, last takes precedence for the window size
-			windowSize := *last
-			if windowSize < (endIndex - startIndex) {
-				endIndex = startIndex + windowSize
-			}
+			break
 		}
 	}
 
-	return startIndex, endIndex
+	// Build the final connection
+	return svc.buildConnectionInMemory(filteredChannels, order, input.After, input.First, input.Before, input.Last, lastPageInfo), nil
+}
+
+// buildConnectionInMemory builds a relay-style connection from filtered channels.
+func (svc *ChannelService) buildConnectionInMemory(
+	channels []*ent.Channel,
+	order *ent.ChannelOrder,
+	after *ent.Cursor,
+	first *int,
+	before *ent.Cursor,
+	last *int,
+	lastPageInfo *ent.PageInfo,
+) *ent.ChannelConnection {
+	conn := &ent.ChannelConnection{
+		Edges:    []*ent.ChannelEdge{},
+		PageInfo: ent.PageInfo{},
+	}
+
+	// Handle empty result
+	if len(channels) == 0 {
+		conn.TotalCount = 0
+		return conn
+	}
+
+	// Determine pagination direction and slice
+	var hasNextPage, hasPreviousPage bool
+	var nodesToReturn []*ent.Channel
+
+	if first != nil {
+		// Forward pagination
+		hasPreviousPage = after != nil
+		if len(channels) > *first {
+			// We have more than requested, so there's a next page
+			hasNextPage = true
+			nodesToReturn = channels[:*first]
+		} else {
+			// Check if database has more pages
+			if lastPageInfo != nil {
+				hasNextPage = lastPageInfo.HasNextPage
+			} else {
+				hasNextPage = false
+			}
+			nodesToReturn = channels
+		}
+	} else if last != nil {
+		// Backward pagination
+		hasNextPage = before != nil
+		if len(channels) > *last {
+			hasPreviousPage = true
+			nodesToReturn = channels[len(channels)-*last:]
+		} else {
+			hasPreviousPage = false
+			nodesToReturn = channels
+		}
+	} else {
+		// No pagination specified, return all
+		hasPreviousPage = after != nil
+		if lastPageInfo != nil {
+			hasNextPage = lastPageInfo.HasNextPage
+		} else {
+			hasNextPage = false
+		}
+		nodesToReturn = channels
+	}
+
+	// Build edges using ToEdge method
+	conn.Edges = make([]*ent.ChannelEdge, len(nodesToReturn))
+	for i, ch := range nodesToReturn {
+		conn.Edges[i] = ch.ToEdge(order)
+	}
+
+	// Set page info
+	conn.PageInfo.HasNextPage = hasNextPage
+	conn.PageInfo.HasPreviousPage = hasPreviousPage
+	conn.TotalCount = len(nodesToReturn)
+
+	if len(conn.Edges) > 0 {
+		conn.PageInfo.StartCursor = &conn.Edges[0].Cursor
+		conn.PageInfo.EndCursor = &conn.Edges[len(conn.Edges)-1].Cursor
+	}
+
+	return conn
 }
