@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/samber/lo"
@@ -130,7 +131,7 @@ func TestChannelService_QueryChannels_WithModelFilter(t *testing.T) {
 	}
 }
 
-func TestChannelService_QueryChannels_WithModelFilter_Pagination(t *testing.T) {
+func TestChannelService_QueryChannels_ForwardPagination(t *testing.T) {
 	svc, client := setupTestChannelService(t)
 	defer client.Close()
 
@@ -138,23 +139,18 @@ func TestChannelService_QueryChannels_WithModelFilter_Pagination(t *testing.T) {
 	ctx = ent.NewContext(ctx, client)
 	ctx = privacy.DecisionContext(ctx, privacy.Allow)
 
-	// Create many channels to test pagination properly
-	var channels []*ent.Channel
+	// Create channels for testing
 	for i := 1; i <= 10; i++ {
 		var models []string
 		if i%2 == 0 {
-			// Even channels support gpt-4
 			models = []string{"gpt-4"}
 		} else {
-			// Odd channels support claude
 			models = []string{"claude-3-opus"}
 		}
-		ch := createTestChannel(t, client, ctx, "Channel "+string(rune('0'+i)), models, nil)
-		channels = append(channels, ch)
+		_ = createTestChannel(t, client, ctx, "FwdChannel"+strconv.Itoa(i), models, nil)
 	}
 
-	// Test forward pagination through gpt-4 channels
-	t.Run("forward pagination with model filter", func(t *testing.T) {
+	t.Run("basic forward pagination", func(t *testing.T) {
 		// First page
 		firstPage, err := svc.QueryChannels(ctx, QueryChannelsInput{
 			Model: lo.ToPtr("gpt-4"),
@@ -209,6 +205,141 @@ func TestChannelService_QueryChannels_WithModelFilter_Pagination(t *testing.T) {
 			uniqueIDs[id] = true
 		}
 		require.Len(t, uniqueIDs, 5) // Total 5 gpt-4 channels
+	})
+}
+
+func TestChannelService_QueryChannels_BackwardPagination(t *testing.T) {
+	svc, client := setupTestChannelService(t)
+	defer client.Close()
+
+	ctx := context.Background()
+	ctx = ent.NewContext(ctx, client)
+	ctx = privacy.DecisionContext(ctx, privacy.Allow)
+
+	// Create channels for testing - ensure predictable IDs by creating them in order
+	var gpt4ChannelNames []string
+	for i := 1; i <= 10; i++ {
+		var models []string
+		name := "BackChannel" + strconv.Itoa(i)
+		if i%2 == 0 {
+			models = []string{"gpt-4"}
+			gpt4ChannelNames = append(gpt4ChannelNames, name)
+		} else {
+			models = []string{"claude-3-opus"}
+		}
+		_ = createTestChannel(t, client, ctx, name, models, nil)
+	}
+
+	t.Run("basic backward pagination", func(t *testing.T) {
+		// Get all gpt-4 channels to establish baseline
+		allPage, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model: lo.ToPtr("gpt-4"),
+		})
+		require.NoError(t, err)
+		require.Len(t, allPage.Edges, 5) // 5 gpt-4 channels total
+
+		// Get last 2 channels (backward from end)
+		lastTwo, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model: lo.ToPtr("gpt-4"),
+			Last:  lo.ToPtr(2),
+		})
+		require.NoError(t, err)
+		require.Len(t, lastTwo.Edges, 2)
+		require.False(t, lastTwo.PageInfo.HasNextPage)
+		require.True(t, lastTwo.PageInfo.HasPreviousPage)
+
+		// Verify they are indeed the last 2 from allPage (by comparing IDs)
+		allIDs := make([]int, len(allPage.Edges))
+		for i, edge := range allPage.Edges {
+			allIDs[i] = edge.Node.ID
+		}
+		lastTwoIDs := []int{lastTwo.Edges[0].Node.ID, lastTwo.Edges[1].Node.ID}
+
+		// The lastTwo should match the last 2 IDs from allPage
+		require.Equal(t, allIDs[len(allIDs)-2:], lastTwoIDs)
+
+		// Get previous 2 channels (backward pagination)
+		prevTwo, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model:  lo.ToPtr("gpt-4"),
+			Last:   lo.ToPtr(2),
+			Before: lastTwo.PageInfo.StartCursor,
+		})
+		require.NoError(t, err)
+		require.Len(t, prevTwo.Edges, 2)
+		require.True(t, prevTwo.PageInfo.HasNextPage)
+		require.True(t, prevTwo.PageInfo.HasPreviousPage)
+
+		// Verify they are the middle 2 from allPage (positions 1 and 2, 0-indexed)
+		prevTwoIDs := []int{prevTwo.Edges[0].Node.ID, prevTwo.Edges[1].Node.ID}
+		require.Equal(t, allIDs[1:3], prevTwoIDs)
+
+		// Get first channel (backward pagination to beginning)
+		firstOne, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model:  lo.ToPtr("gpt-4"),
+			Last:   lo.ToPtr(2),
+			Before: prevTwo.PageInfo.StartCursor,
+		})
+		require.NoError(t, err)
+		require.Len(t, firstOne.Edges, 1) // Only 1 left
+		require.True(t, firstOne.PageInfo.HasNextPage)
+		require.False(t, firstOne.PageInfo.HasPreviousPage)
+
+		// Verify it's the first from allPage
+		require.Equal(t, allIDs[0], firstOne.Edges[0].Node.ID)
+	})
+}
+
+func TestChannelService_QueryChannels_MixedPagination(t *testing.T) {
+	svc, client := setupTestChannelService(t)
+	defer client.Close()
+
+	ctx := context.Background()
+	ctx = ent.NewContext(ctx, client)
+	ctx = privacy.DecisionContext(ctx, privacy.Allow)
+
+	// Create channels for testing
+	for i := 1; i <= 10; i++ {
+		var models []string
+		if i%2 == 0 {
+			models = []string{"gpt-4"}
+		} else {
+			models = []string{"claude-3-opus"}
+		}
+		_ = createTestChannel(t, client, ctx, "MixChannel"+strconv.Itoa(i), models, nil)
+	}
+
+	t.Run("forward then backward", func(t *testing.T) {
+		// Forward: get first 2
+		firstTwo, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model: lo.ToPtr("gpt-4"),
+			First: lo.ToPtr(2),
+		})
+		require.NoError(t, err)
+		require.Len(t, firstTwo.Edges, 2)
+
+		// Forward: get next 2
+		nextTwo, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model: lo.ToPtr("gpt-4"),
+			First: lo.ToPtr(2),
+			After: firstTwo.PageInfo.EndCursor,
+		})
+		require.NoError(t, err)
+		require.Len(t, nextTwo.Edges, 2)
+
+		// Backward: get previous 1 from nextTwo
+		prevOne, err := svc.QueryChannels(ctx, QueryChannelsInput{
+			Model:  lo.ToPtr("gpt-4"),
+			Last:   lo.ToPtr(1),
+			Before: nextTwo.PageInfo.StartCursor,
+		})
+		require.NoError(t, err)
+		require.Len(t, prevOne.Edges, 1)
+
+		// Should be the last item from firstTwo (verify by checking it exists in firstTwo)
+		firstTwoIDs := []int{firstTwo.Edges[0].Node.ID, firstTwo.Edges[1].Node.ID}
+		require.Contains(t, firstTwoIDs, prevOne.Edges[0].Node.ID)
+		// Specifically, it should be the second element of firstTwo
+		require.Equal(t, firstTwo.Edges[1].Node.ID, prevOne.Edges[0].Node.ID)
 	})
 }
 

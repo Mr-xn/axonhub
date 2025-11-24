@@ -69,17 +69,47 @@ func (svc *ChannelService) queryChannelsWithModelFilter(
 		order = ent.DefaultChannelOrder
 	}
 
-	// Determine how many results we need
+	// Determine pagination mode and how many results we need
 	var needed int
-	if input.First != nil {
-		needed = *input.First + 1 // +1 to check hasNextPage
-	} else if input.Last != nil {
+	var isBackward bool
+
+	if input.Last != nil {
+		// Backward pagination
+		isBackward = true
 		needed = *input.Last + 1 // +1 to check hasPreviousPage
+	} else if input.First != nil {
+		// Forward pagination
+		isBackward = false
+		needed = *input.First + 1 // +1 to check hasNextPage
 	} else {
-		needed = 100 // Default limit when no pagination specified
+		// No pagination specified, default to forward
+		isBackward = false
+		needed = 100 // Default limit
 	}
 
-	// Collect filtered channels by fetching in batches
+	var filteredChannels []*ent.Channel
+	var lastPageInfo *ent.PageInfo
+
+	if isBackward {
+		// Backward pagination: query from before cursor backwards
+		filteredChannels, lastPageInfo = svc.fetchChannelsBackward(ctx, query, input, order, needed)
+	} else {
+		// Forward pagination: query from after cursor forwards
+		filteredChannels, lastPageInfo = svc.fetchChannelsForward(ctx, query, input, order, needed)
+	}
+
+	// Build the final connection
+	return svc.buildConnectionInMemory(filteredChannels, order, input.After, input.First, input.Before, input.Last, lastPageInfo), nil
+}
+
+// fetchChannelsForward fetches channels in forward direction (after -> forward).
+func (svc *ChannelService) fetchChannelsForward(
+	ctx context.Context,
+	query *ent.ChannelQuery,
+	input QueryChannelsInput,
+	order *ent.ChannelOrder,
+	needed int,
+) ([]*ent.Channel, *ent.PageInfo) {
 	var filteredChannels []*ent.Channel
 	var currentAfter *ent.Cursor = input.After
 	var lastPageInfo *ent.PageInfo
@@ -87,12 +117,12 @@ func (svc *ChannelService) queryChannelsWithModelFilter(
 	const maxIterations = 20 // Safety limit to prevent infinite loops
 
 	for range maxIterations {
-		// Fetch a batch of channels
+		// Fetch a batch of channels (forward pagination)
 		page, err := query.Paginate(ctx, currentAfter, lo.ToPtr(batchSize), input.Before, nil,
 			ent.WithChannelOrder(order),
 		)
 		if err != nil {
-			return nil, err
+			break
 		}
 
 		lastPageInfo = &page.PageInfo
@@ -123,8 +153,71 @@ func (svc *ChannelService) queryChannelsWithModelFilter(
 		}
 	}
 
-	// Build the final connection
-	return svc.buildConnectionInMemory(filteredChannels, order, input.After, input.First, input.Before, input.Last, lastPageInfo), nil
+	return filteredChannels, lastPageInfo
+}
+
+// fetchChannelsBackward fetches channels in backward direction (before -> backward).
+func (svc *ChannelService) fetchChannelsBackward(
+	ctx context.Context,
+	query *ent.ChannelQuery,
+	input QueryChannelsInput,
+	order *ent.ChannelOrder,
+	needed int,
+) ([]*ent.Channel, *ent.PageInfo) {
+	// For backward pagination, we collect all batches first, then reverse the order
+	var allBatches [][]*ent.Channel
+	var currentBefore *ent.Cursor = input.Before
+	var lastPageInfo *ent.PageInfo
+	const batchSize = 50     // Fetch 50 at a time
+	const maxIterations = 20 // Safety limit to prevent infinite loops
+	totalCollected := 0
+
+	for range maxIterations {
+		// Fetch a batch of channels (backward pagination)
+		// Use 'last' instead of 'first' to go backwards
+		page, err := query.Paginate(ctx, input.After, nil, currentBefore, lo.ToPtr(batchSize),
+			ent.WithChannelOrder(order),
+		)
+		if err != nil {
+			break
+		}
+
+		lastPageInfo = &page.PageInfo
+
+		// Filter this batch by model support
+		var batchFiltered []*ent.Channel
+		for _, edge := range page.Edges {
+			channelObj := Channel{Channel: edge.Node}
+			if channelObj.IsModelSupported(*input.Model) {
+				batchFiltered = append(batchFiltered, edge.Node)
+			}
+		}
+
+		if len(batchFiltered) > 0 {
+			allBatches = append(allBatches, batchFiltered)
+			totalCollected += len(batchFiltered)
+		}
+
+		// Stop if we have enough or no more pages
+		if totalCollected >= needed || !page.PageInfo.HasPreviousPage {
+			break
+		}
+
+		// Move to previous page (the first cursor in this batch)
+		if len(page.Edges) > 0 {
+			currentBefore = &page.Edges[0].Cursor
+		} else {
+			break
+		}
+	}
+
+	// Now reverse the batches and flatten
+	var filteredChannels []*ent.Channel
+	for i := len(allBatches) - 1; i >= 0; i-- {
+		filteredChannels = append(filteredChannels, allBatches[i]...)
+	}
+
+	return filteredChannels, lastPageInfo
 }
 
 // buildConnectionInMemory builds a relay-style connection from filtered channels.
@@ -170,14 +263,21 @@ func (svc *ChannelService) buildConnectionInMemory(
 		}
 	} else if last != nil {
 		// Backward pagination
-		hasNextPage = before != nil
 		if len(channels) > *last {
+			// We have more than requested, so there's a previous page
 			hasPreviousPage = true
 			nodesToReturn = channels[len(channels)-*last:]
 		} else {
-			hasPreviousPage = false
+			// Check if database has more pages (going backward)
+			if lastPageInfo != nil {
+				hasPreviousPage = lastPageInfo.HasPreviousPage
+			} else {
+				hasPreviousPage = false
+			}
 			nodesToReturn = channels
 		}
+		// For backward pagination, hasNextPage depends on before cursor
+		hasNextPage = before != nil
 	} else {
 		// No pagination specified, return all
 		hasPreviousPage = after != nil
