@@ -27,8 +27,9 @@ type PersistenceState struct {
 	LlmRequest    *llm.Request
 
 	// Persistence state
-	Request     *ent.Request
-	RequestExec *ent.RequestExecution
+	Request         *ent.Request
+	RequestExec     *ent.RequestExecution
+	rawResponseBody []byte // Used by request_execution middleware to pass response body
 
 	// Channel state
 	Channels       []*biz.Channel
