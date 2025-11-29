@@ -1,0 +1,68 @@
+# 'CodeQL' 工作流的名称，将显示在 GitHub Actions 的界面中
+name: "CodeQL Security Analysis"
+
+# 配置工作流的触发事件
+on:
+  # 当有代码推送到 main 或 master 分支时触发
+  push:
+    branches: [ "main", "master" ]
+  # 当有针对 main 或 master 分支的拉取请求时触发
+  pull_request:
+    branches: [ "main", "master" ]
+  # 允许你通过 "Actions" 标签页手动运行此工作流
+  workflow_dispatch:
+  # 定时触发，使用 cron 语法（此处设置为每周三早上5:30 UTC）
+  # schedule:
+  #   - cron: '30 5 * * 3'
+
+# 定义工作流中的任务
+jobs:
+  # 定义一个名为 'analyze' 的分析任务
+  analyze:
+    # 任务的显示名称
+    name: Analyze Go Code
+    # 指定任务运行的环境，建议使用最新的稳定版 Ubuntu
+    runs-on: ubuntu-latest
+    
+    # 定义任务所需的权限
+    permissions:
+      # 允许读取代码内容，用于 checkout
+      contents: read
+      # 允许写入安全事件，用于上传 CodeQL 分析结果
+      security-events: write
+      # 允许对拉取请求进行操作，例如添加评论
+      pull-requests: read
+
+    # 任务执行的步骤
+    steps:
+      # 第一步：检出你的代码仓库
+      - name: Checkout repository
+        # 使用官方的 checkout action
+        uses: actions/checkout@v4
+
+      # 第二步：初始化 CodeQL 分析工具
+      - name: Initialize CodeQL
+        # 使用官方的 CodeQL 初始化 action
+        uses: github/codeql-action/init@v3
+        with:
+          # 指定要分析的语言，对于此项目，我们设置为 'go'
+          languages: go
+          # 你可以在此处添加自定义的查询配置，但对于初次设置，默认即可
+          # queries: +security-extended, +security-and-quality
+
+      # 第三步：构建 Go 项目（对于 Go 语言，CodeQL 需要观察构建过程来创建数据库）
+      # CodeQL 的 'autobuild' 功能通常能自动检测并构建 Go 项目
+      # 如果 'autobuild' 失败，你需要在此处替换为项目的手动构建命令
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      
+      # 如果 Autobuild 失败，可以注释掉上面的 Autobuild 步骤，并使用下面的手动构建步骤：
+      # - name: Build Go application
+      #   run: |
+      #     # 在这里写下你的项目构建命令，例如：
+      #     go build ./...
+
+      # 第四步：执行 CodeQL 分析
+      - name: Perform CodeQL Analysis
+        # 使用官方的 CodeQL 分析 action
+        uses: github/codeql-action/analyze@v3
