@@ -374,7 +374,7 @@ func (svc *ChannelService) RecordMetrics(ctx context.Context, channelID int, met
 	avgStreamTokensPerSecond := metrics.CalculateAvgStreamTokensPerSecond()
 
 	// Ensure ChannelPerformance record exists
-	perf, err := svc.entFromContext(ctx).ChannelPerformance.Query().
+	perf, err := svc.db.ChannelPerformance.Query().
 		Where(channelperformance.ChannelID(channelID)).
 		First(ctx)
 	if err != nil {
@@ -383,7 +383,7 @@ func (svc *ChannelService) RecordMetrics(ctx context.Context, channelID int, met
 	}
 
 	// Update metrics with both calculated averages and raw counters
-	update := svc.entFromContext(ctx).ChannelPerformance.UpdateOneID(perf.ID).
+	update := svc.db.ChannelPerformance.UpdateOneID(perf.ID).
 		SetSuccessRate(int(successRate)).
 		SetAvgLatencyMs(int(avgLatencyMs)).
 		SetAvgTokenPerSecond(int(avgTokensPerSecond)).
@@ -426,7 +426,7 @@ func (svc *ChannelService) markChannelUnavailable(ctx context.Context, channelID
 
 	ctx = privacy.DecisionContext(ctx, privacy.Allow)
 
-	_, err := svc.entFromContext(ctx).Channel.UpdateOneID(channelID).
+	_, err := svc.db.Channel.UpdateOneID(channelID).
 		SetStatus(channel.StatusDisabled).
 		SetErrorMessage(deriveErrorMessage(errorStatusCode)).
 		Save(ctx)
@@ -562,7 +562,12 @@ func (svc *ChannelService) startPerformanceProcess() {
 		case perf := <-svc.perfCh:
 			svc.RecordPerformance(context.Background(), perf)
 		case <-ticker.C:
-			svc.flushPerformanceMetrics(context.Background())
+			err := svc.Executors.ExecuteFunc(func(ctx context.Context) {
+				svc.flushPerformanceMetrics(ctx)
+			})
+			if err != nil {
+				log.Error(context.Background(), "failed to execute flush performance metrics", log.Cause(err))
+			}
 		}
 	}
 }
@@ -591,10 +596,7 @@ func (svc *ChannelService) flushPerformanceMetrics(ctx context.Context) {
 			continue
 		}
 
-		err := svc.Executors.ExecuteFunc(func(ctx context.Context) { svc.RecordMetrics(ctx, channelID, aggregatedMetrics) })
-		if err != nil {
-			log.Error(ctx, "failed to execute record metrics", log.Any("metric", aggregatedMetrics), log.Cause(err))
-		}
+		svc.RecordMetrics(ctx, channelID, aggregatedMetrics)
 	}
 }
 

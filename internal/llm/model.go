@@ -159,6 +159,10 @@ type Request struct {
 	// Controls effort on reasoning for reasoning models. It can be set to "low", "medium", or "high".
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
+	// Reasoning budget for reasoning models.
+	// Help fields， will not be sent to the llm service.
+	ReasoningBudget *int64 `json:"-"`
+
 	// Specifies the processing type used for serving the request.
 	ServiceTier *string `json:"service_tier,omitempty"`
 
@@ -263,6 +267,9 @@ type Message struct {
 	// Is is a help field, will not be sent to the llm service.
 	MessageIndex *int    `json:"-"`
 	ToolCallID   *string `json:"tool_call_id,omitempty"`
+	// The name of the tool call.
+	// Is is a help field, will not be sent to the llm service.
+	ToolCallName *string `json:"-"`
 	// This field is a help field, will not be sent to the llm service.
 	ToolCallIsError *bool      `json:"-"`
 	ToolCalls       []ToolCall `json:"tool_calls,omitempty"`
@@ -458,6 +465,11 @@ type Usage struct {
 	TotalTokens             int64                    `json:"total_tokens"`
 	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details"`
+
+	// Output only. A detailed breakdown of the token count for each modality in the prompt.
+	PromptModalityTokenDetails []ModalityTokenCount `json:"-"`
+	// Output only. A detailed breakdown of the token count for each modality in the candidates.
+	CompletionModalityTokenDetails []ModalityTokenCount `json:"-"`
 }
 
 func (u *Usage) GetCompletionTokens() *int64 {
@@ -532,4 +544,11 @@ type ErrorDetail struct {
 	Type      string `json:"type"`
 	Param     string `json:"param,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
+}
+
+// ModalityTokenCount Represents token counting info for a single modality.
+type ModalityTokenCount struct {
+	Modality string `json:"modality,omitempty"`
+	// Number of tokens.
+	TokenCount int64 `json:"token_count,omitempty"`
 }

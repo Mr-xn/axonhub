@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/looplj/axonhub/internal/pkg/streams"
 )
@@ -14,6 +15,8 @@ type Request struct {
 	// HTTP basics
 	Method      string      `json:"method"`
 	URL         string      `json:"url"`
+	Path        string      `json:"path"`
+	Query       url.Values  `json:"query"`
 	Headers     http.Header `json:"headers"`
 	ContentType string      `json:"content_type"`
 	Body        []byte      `json:"body,omitempty"`

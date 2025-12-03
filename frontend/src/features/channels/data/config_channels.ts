@@ -18,12 +18,14 @@ import {
   BurnCloud,
   Vercel,
   ModelScope,
+  Bailian,
 } from '@lobehub/icons'
 import { BURNCLOUD_DEFAULT_MODELS } from './burncloud-models'
 import { ApiFormat, ChannelType } from './schema'
 
 export const OPENAI_CHAT_COMPLETIONS: ApiFormat = 'openai/chat_completions'
 export const ANTHROPIC_MESSAGES: ApiFormat = 'anthropic/messages'
+export const GEMINI_CONTENTS: ApiFormat = 'gemini/contents'
 
 /**
  * Channel configuration interface
@@ -78,7 +80,7 @@ export const CHANNEL_CONFIGS: Record<ChannelType, ChannelConfig> = {
   },
   anthropic: {
     channelType: 'anthropic',
-    baseURL: 'https://api.anthropic.com/v1',
+    baseURL: 'https://api.anthropic.com',
     defaultModels: ['claude-opus-4-5', 'claude-sonnet-4-5'],
     apiFormat: ANTHROPIC_MESSAGES,
     color: 'bg-orange-100 text-orange-800 border-orange-200',
@@ -89,6 +91,14 @@ export const CHANNEL_CONFIGS: Record<ChannelType, ChannelConfig> = {
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
     defaultModels: ['gemini-2.5-pro', 'gemini-2.5-flash'],
     apiFormat: OPENAI_CHAT_COMPLETIONS,
+    color: 'bg-green-100 text-green-800 border-green-200',
+    icon: Google,
+  },
+  gemini: {
+    channelType: 'gemini',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModels: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+    apiFormat: GEMINI_CONTENTS,
     color: 'bg-green-100 text-green-800 border-green-200',
     icon: Google,
   },
@@ -401,6 +411,18 @@ export const CHANNEL_CONFIGS: Record<ChannelType, ChannelConfig> = {
     apiFormat: OPENAI_CHAT_COMPLETIONS,
     color: 'bg-purple-100 text-purple-800 border-purple-200',
     icon: ModelScope,
+  },
+  bailian: {
+    channelType: 'bailian',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultModels: [
+      'qwen-max-plus',
+      'qwen-turbo',
+      'qwen-max',
+    ],
+    apiFormat: OPENAI_CHAT_COMPLETIONS,
+    color: 'bg-blue-100 text-blue-800 border-blue-200',
+    icon: Bailian,
   },
   anthropic_aws: {
     channelType: 'anthropic_aws',

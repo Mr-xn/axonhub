@@ -762,6 +762,7 @@ enum ChannelType @goModel(model: "github.com/looplj/axonhub/internal/ent/channel
   anthropic_aws
   anthropic_gcp
   gemini_openai
+  gemini
   deepseek
   deepseek_anthropic
   doubao
@@ -786,6 +787,7 @@ enum ChannelType @goModel(model: "github.com/looplj/axonhub/internal/ent/channel
   aihubmix
   burncloud
   modelscope
+  bailian
 }
 """
 ChannelWhereInput is used for filtering Channel objects.

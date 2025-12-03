@@ -70,6 +70,8 @@ func NewOutboundTransformerWithConfig(config *Config) (transformer.Outbound, err
 		return nil, fmt.Errorf("invalid OpenAI transformer configuration: %w", err)
 	}
 
+	config.BaseURL = strings.TrimSuffix(config.BaseURL, "/")
+
 	rt, err := oairesp.NewOutboundTransformer(config.BaseURL, config.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenAI outbound transformer: %w", err)
@@ -266,18 +268,21 @@ func (t *OutboundTransformer) TransformStreamChunk(
 
 // buildPlatformURL constructs the appropriate URL based on the platform.
 func (t *OutboundTransformer) buildPlatformURL(chatReq *llm.Request) (string, error) {
-	baseURL := strings.TrimSuffix(t.config.BaseURL, "/")
 	//nolint:exhaustive // Chcked.
 	switch t.config.Type {
 	case PlatformAzure:
 		// Build the Azure OpenAI URL
 		azureURL := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s",
-			baseURL, chatReq.Model, t.config.APIVersion)
+			t.config.BaseURL, chatReq.Model, t.config.APIVersion)
 
 		return azureURL, nil
 	default:
 		// Standard OpenAI API
-		return baseURL + "/chat/completions", nil
+		if strings.HasSuffix(t.config.BaseURL, "/v1") {
+			return t.config.BaseURL + "/chat/completions", nil
+		}
+
+		return t.config.BaseURL + "/v1/chat/completions", nil
 	}
 }
 
